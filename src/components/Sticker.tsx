@@ -438,6 +438,8 @@ export default function Sticker({
       role="button"
       tabIndex={0}
       aria-label={`Peel sticker ${item.id + 1}: ${item.teaser}`}
+      data-action-name="Peel Sticker"
+      data-action-value={item.teaser}
     >
       {/* 1. Still-stuck portion of the sticker */}
       <div ref={stuckRef} className="peel-stuck">

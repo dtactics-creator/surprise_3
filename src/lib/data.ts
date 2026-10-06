@@ -1,5 +1,7 @@
 export type Offer = {
-  type: "discount" | "freebie" | "deal" | "reward";
+  type: string;
+  category?: string;
+  brand?: string;
   value: string;
   code: string;
   blurb: string;
@@ -53,21 +55,86 @@ const TEASERS = [
   "STRIKE",
   "GOAL",
   "PEEL ME",
-  "COUPON",
+  // "COUPON",
+  "DTacticsIT"
 ];
 
-export function buildLayout(vw: number, vh: number): StickerItem[] {
+export function buildLayout(vw: number, vh: number, offers: Offer[], targetCount?: number, fixedSize?: boolean): StickerItem[] {
+  const rand = mulberry32(Math.round(vw) * 7919 + Math.round(vh) * 104729 + 19);
+  
+  const activeOffers = offers.length > 0 ? offers : OFFERS;
+
+  let offerCursor = Math.floor(rand() * activeOffers.length);
+  const nextOffer = () => {
+    const o = offerCursor % activeOffers.length;
+    offerCursor += 1 + (rand() < 0.35 ? 1 : 0);
+    return o;
+  };
+
+  if (targetCount !== undefined && targetCount > 0 && !fixedSize) {
+    const ratio = vw / vh;
+    const rows = Math.max(1, Math.round(Math.sqrt(targetCount / ratio)));
+    const avgCols = targetCount / rows;
+
+    const sy = vh / rows;
+    const sx = vw / avgCols;
+    const baseDiameter = Math.sqrt(sx * sx + sy * sy) * 0.85; // 0.85 multiplier to cover slight jitter gaps
+
+    const items: StickerItem[] = [];
+    let added = 0;
+
+    // Distribute items as evenly as possible across rows
+    const baseItemsPerRow = Math.floor(targetCount / rows);
+    const remainder = targetCount % rows;
+
+    for (let r = 0; r < rows; r++) {
+      // The first 'remainder' rows get 1 extra item to perfectly distribute targetCount
+      const itemsInThisRow = baseItemsPerRow + (r < remainder ? 1 : 0);
+      if (itemsInThisRow <= 0) continue;
+
+      const rowSx = vw / itemsInThisRow;
+
+      for (let c = 0; c < itemsInThisRow; c++) {
+        // Jitter position to make it organic
+        const jx = (rand() - 0.5) * rowSx * 0.25;
+        const jy = (rand() - 0.5) * sy * 0.25;
+
+        const x = (c + 0.5) * rowSx + jx;
+        const y = (r + 0.5) * sy + jy;
+        const d = baseDiameter;
+
+        const pal = PALETTE_POOL[Math.floor(rand() * PALETTE_POOL.length)];
+        const kind: 0 | 1 = rand() < 0.48 ? 1 : 0;
+        const offer = nextOffer();
+
+        items.push({
+          id: added,
+          x,
+          y,
+          d,
+          rot: Math.round((rand() * 2 - 1) * 24),
+          pal,
+          kind,
+          teaser: kind === 1 ? activeOffers[offer].value : TEASERS[Math.floor(rand() * TEASERS.length)],
+          offer,
+        });
+        added++;
+      }
+    }
+    return items;
+  }
+
+  // Fallback for undefined targetCount or fixedSize === true
   const mobile = vw < 720;
   const spacing = mobile ? 92 : vw < 1120 ? 120 : 136;
-  /* Larger diameter than grid spacing so round stickers overlap and genuinely hide the ad underneath */
   const dBase = spacing * (mobile ? 1.24 : 1.28);
   const padX = mobile ? 4 : 8;
   const padTop = mobile ? 56 : 58;
   const padBot = mobile ? 8 : 10;
-  const maxCount = mobile ? 44 : 76;
+  const defaultMaxCount = mobile ? 44 : 76;
+  const maxCount = (targetCount && fixedSize) ? Math.max(defaultMaxCount, targetCount) : defaultMaxCount;
   const minCount = mobile ? 36 : 48;
 
-  const rand = mulberry32(Math.round(vw) * 7919 + Math.round(vh) * 104729 + 19);
   const placed: { x: number; y: number; d: number }[] = [];
   const items: StickerItem[] = [];
 
@@ -97,7 +164,7 @@ export function buildLayout(vw: number, vh: number): StickerItem[] {
       rot: Math.round((rand() * 2 - 1) * 24),
       pal,
       kind,
-      teaser: kind === 1 ? OFFERS[offer].value : TEASERS[Math.floor(rand() * TEASERS.length)],
+      teaser: kind === 1 ? activeOffers[offer].value : TEASERS[Math.floor(rand() * TEASERS.length)],
       offer,
     });
   };
@@ -111,13 +178,6 @@ export function buildLayout(vw: number, vh: number): StickerItem[] {
   const y0 = padTop + sy / 2;
   const x0 = padX + sx / 2;
 
-  let offerCursor = Math.floor(rand() * OFFERS.length);
-  const nextOffer = () => {
-    const o = offerCursor % OFFERS.length;
-    offerCursor += 1 + (rand() < 0.35 ? 1 : 0);
-    return o;
-  };
-
   for (let r = 0; r < rows; r++) {
     const rowShift = (r % 2) * sx * 0.42 + (rand() - 0.5) * sx * 0.18;
     for (let c = 0; c < cols; c++) {
@@ -126,7 +186,7 @@ export function buildLayout(vw: number, vh: number): StickerItem[] {
         const jy = (rand() - 0.5) * 2 * sy * (0.14 + attempt * 0.05);
         const x = Math.min(vw - padX - 24, Math.max(padX + 24, x0 + c * sx + rowShift + jx));
         const y = Math.min(vh - padBot - 24, Math.max(padTop + 24, y0 + r * sy + jy));
-        const d = dBase * (0.92 + rand() * 0.22);
+        const d = dBase;
         if (fits(x, y, d, 0.56)) {
           push(x, y, d, nextOffer());
           break;
@@ -135,21 +195,53 @@ export function buildLayout(vw: number, vh: number): StickerItem[] {
     }
   }
 
-  /* Organic fill pass — fills gaps so the underlying ad is well covered initially */
-  for (let attempt = 0; attempt < 950 && items.length < maxCount; attempt++) {
+  /* Organic fill pass */
+  for (let attempt = 0; attempt < 5000 && items.length < maxCount; attempt++) {
     const x = padX + 24 + rand() * (availW - 48);
     const y = padTop + 24 + rand() * (availH - 48);
-    const d = dBase * (0.86 + rand() * 0.28);
-    if (fits(x, y, d, 0.52)) push(x, y, d, nextOffer());
+    const d = dBase;
+    if (fits(x, y, d, 0.45)) push(x, y, d, nextOffer());
   }
 
   if (items.length < minCount) {
     for (let attempt = 0; attempt < 500 && items.length < minCount; attempt++) {
       const x = padX + 20 + rand() * (availW - 40);
       const y = padTop + 20 + rand() * (availH - 40);
-      const d = dBase * (0.78 + rand() * 0.24);
-      if (fits(x, y, d, 0.44)) push(x, y, d, nextOffer());
+      const d = dBase;
+      if (fits(x, y, d, 0.35)) push(x, y, d, nextOffer());
     }
+  }
+
+  // If the user requested a massive targetCount, forcefully add them since they won't pass the fits() check
+  if (targetCount !== undefined && targetCount > 0 && fixedSize && items.length < targetCount) {
+    while (items.length < targetCount) {
+      const x = padX + 20 + rand() * (availW - 40);
+      const y = padTop + 20 + rand() * (availH - 40);
+      push(x, y, dBase, nextOffer());
+    }
+  }
+
+  if (targetCount !== undefined && targetCount > 0 && fixedSize && targetCount < items.length) {
+    const shuffled = [...items];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const finalItems = shuffled.slice(0, targetCount);
+    // Ensure all active offers are evenly distributed among the final items
+    finalItems.forEach((item, idx) => {
+      item.offer = idx % activeOffers.length;
+      if (item.kind === 1) item.teaser = activeOffers[item.offer].value;
+    });
+    return finalItems;
+  }
+
+  // If we didn't truncate, just ensure offers are balanced in the final array anyway
+  if (targetCount !== undefined && targetCount > 0) {
+    items.forEach((item, idx) => {
+      item.offer = idx % activeOffers.length;
+      if (item.kind === 1) item.teaser = activeOffers[item.offer].value;
+    });
   }
 
   return items;
