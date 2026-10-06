@@ -18,7 +18,7 @@ export default function CatalogModal({ offers, onClose }: Props) {
   };
 
   return (
-    <div className={`offer-backdrop ${isClosing ? "opacity-0" : "opacity-100"} transition-opacity duration-300 z-[100]`} style={{ padding: 0 }}>
+    <div className={`offer-backdrop !block ${isClosing ? "opacity-0" : "opacity-100"} transition-opacity duration-300 z-[100]`} style={{ padding: 0 }}>
       <div
         className="w-full h-full flex flex-col bg-newsprint"
       >
